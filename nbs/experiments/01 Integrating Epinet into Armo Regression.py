@@ -231,8 +231,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm, trange
+import os
+import glob
+from datetime import datetime
+
 def train_epinet(epinet, indexer, embeddings, sparse_rewards, hidden_size,
-                 batch_size=64, num_epochs=100, lr=1e-3):
+                 batch_size=64, num_epochs=100, lr=1e-3, load_latest=False):
     """
     Train the epinet using masked MSE loss.
 
@@ -245,7 +249,21 @@ def train_epinet(epinet, indexer, embeddings, sparse_rewards, hidden_size,
         batch_size: Batch size for training
         num_epochs: Number of training epochs
         lr: Learning rate
+        load_latest: If True, load most recent saved model if it exists
     """
+    # Setup save directory
+    save_dir = os.path.join(os.path.expanduser("~"), "data", "ArmoRM", "weights")
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Check for latest saved model if requested
+    if load_latest:
+        model_files = glob.glob(os.path.join(save_dir, "epinet_*.pt"))
+        if model_files:
+            latest_model = max(model_files, key=os.path.getctime)
+            print(f"Loading latest model from {latest_model}")
+            epinet.load_state_dict(torch.load(latest_model))
+            return epinet
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     epinet = epinet.to(device)
 
@@ -279,8 +297,8 @@ def train_epinet(epinet, indexer, embeddings, sparse_rewards, hidden_size,
 
             # Forward pass
             epiout = epinet(batch_embeddings, indices)
-            predicted_rewards = epiout.train + epiout.prior # preweighted sum of the learnable and fixed components 
-            
+            predicted_rewards = epiout.train + epiout.prior # preweighted sum of the learnable and fixed components
+
             # Create mask for non-nan values
             mask = ~torch.isnan(batch_rewards)
 
@@ -304,6 +322,13 @@ def train_epinet(epinet, indexer, embeddings, sparse_rewards, hidden_size,
         # Print epoch statistics
         print(f'Epoch {epoch+1}/{num_epochs}, Average Loss: {epoch_loss/n_batches:.6f}')
 
+        # Save model with timestamp
+        if epoch % 25 == 0:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            save_path = os.path.join(save_dir, f"epinet_{timestamp}.pt")
+            torch.save(epinet.state_dict(), save_path)
+            print(f"Model saved to {save_path}")
+
     return epinet
 
 
@@ -321,13 +346,119 @@ trained_epinet = train_epinet(
     embeddings=embeddings,
     sparse_rewards=sparse_rewards,
     hidden_size=hidden_size,
-    lr = 1e-5
+    lr = 1e-5,
+    load_latest = True,
 )
 
+# %%
+trained_epinet
+
+
 # %% [markdown]
-# # Results
+# # Analysis
+
+# %% [markdown]
+# The first thing we need in evaluating our epinet is a quantification of uncertainty per dimension. We can then perform this measurement across the dataset, and report:
+# 1. Average uncertainty per dimension across all samples
+# 2. Variance of uncertainty per dimension across all samples
 
 # %%
+def sample_epinet_outputs(trained_epinet, indexer, embeddings, n_samples=10, batch_size=128):
+    """
+    Sample multiple outputs from a trained epinet for each input embedding.
+
+    Args:
+        trained_epinet: The trained epinet model
+        indexer: The indexer function for generating random indices
+        embeddings: Input embeddings tensor of shape (n_embeddings, hidden_size)
+        n_samples: Number of samples to generate per input
+        batch_size: Batch size for processing
+
+    Returns:
+        torch.Tensor: Array of shape (n_embeddings, n_dimensions, n_samples)
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    trained_epinet = trained_epinet.to(device)
+
+    n_embeddings = embeddings.shape[0]
+    n_dimensions = 19  # number of reward dimensions
+
+    # Initialize output tensor
+    all_outputs = torch.zeros((n_embeddings, n_dimensions, n_samples), device=device)
+    # Process in batches
+    with torch.no_grad():  # disable gradient computation for inference
+        for batch_start in tqdm(range(0, n_embeddings, batch_size), desc="Processing batches"):
+            # Get batch of embeddings
+            batch_end = min(batch_start + batch_size, n_embeddings)
+            batch_embeddings = embeddings[batch_start:batch_end].to(device)
+
+            # Initialize batch predictions tensor
+            batch_predictions = torch.zeros((batch_end - batch_start, n_dimensions, n_samples), device=device)
+
+            # Sample multiple times for each embedding
+            for i in range(n_samples):
+                # Generate index for this sample
+                indices = indexer(1).to(device)
+
+                # Get predictions for this sample
+                outputs = trained_epinet(batch_embeddings, indices)
+                predictions = outputs.train + outputs.prior  # combine train and prior predictions
+
+                # Store predictions for this sample
+                batch_predictions[:, :, i] = predictions
+
+            # Store in output tensor
+            all_outputs[batch_start:batch_end] = batch_predictions
+            # Clear GPU memory
+            del batch_embeddings, indices, outputs, predictions, batch_predictions
+            torch.cuda.empty_cache()
+
+    return all_outputs
+
+
+
+# %%
+torch.vstack([indexer(42) for i in range(10)])
+
+# %%
+indexer(42)
+
+# %%
+# Usage example:
+samples = sample_epinet_outputs(
+    trained_epinet=trained_epinet,
+    indexer=indexer,
+    embeddings=embeddings,
+    n_samples=100,
+    batch_size=128
+)
+
+# Calculate statistics
+mean_predictions = samples.mean(dim=2)  # Average across samples
+std_predictions = samples.std(dim=2)    # Standard deviation across samples
+
+# %%
+samples.shape
+
+# %%
+samples[0,0,:]
+
+# %%
+samples.std(dim=2)
+
+# %%
+mean_std_per_dimension = (samples.std(dim=2)).mean(dim=0)  # Average across samples
+mean_std_per_dimension
+
+# %%
+std_of_std_per_dimension = (samples.std(dim=2)).std(dim=0)  # Average across samples
+std_of_std_per_dimension
+
+# %% [markdown]
+# These early results show that 
+# 1. different reward dimensions have different 'uncertainties'.
+# 2. The uncertainty per reward dimension changes across samples on a magnitude equal to the original std.
+# 3. The last six dimensions are, weirdly, far more uncertain than the first 13. 
 
 # %% [markdown]
 # # Conclusion
