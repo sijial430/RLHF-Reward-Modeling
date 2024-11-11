@@ -1,1 +1,1 @@
-formats = "ipynb,py:percent"
+formats = "ipynb,quarto"

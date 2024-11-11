@@ -8,8 +8,8 @@ from typing_extensions import Protocol
 import abc
 import logging
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# logging.basicConfig(level=logging.INFO)
+# logger = logging.getLogger(__name__)
 
 Array = torch.Tensor
 PRNGKey = np.ndarray
@@ -55,14 +55,14 @@ class ExposedMLP(nn.Module):
         assert len(self.expose_layers) == len(self.layers)
 
     def forward(self, inputs: torch.Tensor) -> OutputWithPrior:
-        logger.info(f"{self.name} forward pass - Input shape: {inputs.shape}")
+        # logger.info(f"{self.name} forward pass - Input shape: {inputs.shape}")
 
         layers_features = []
         out = inputs
 
         for i, layer in enumerate(self.layers):
             out = layer(out)
-            logger.info(f"{self.name} layer {i} output shape: {out.shape}")
+            # logger.info(f"{self.name} layer {i} output shape: {out.shape}")
             if i < (self.num_layers - 1):
                 out = torch.relu(out)
             layers_features.append(out)
@@ -76,8 +76,8 @@ class ExposedMLP(nn.Module):
         if self.stop_gradient:
             exposed_features = exposed_features.detach()
 
-        logger.info(f"{self.name} final output shape: {out.shape}")
-        logger.info(f"{self.name} exposed features shape: {exposed_features.shape}")
+        # logger.info(f"{self.name} final output shape: {out.shape}")
+        # logger.info(f"{self.name} exposed features shape: {exposed_features.shape}")
 
         return OutputWithPrior(
             train=out,
@@ -111,18 +111,18 @@ class ProjectedMLP(nn.Module):
         self.index_dim = index_dim
 
     def forward(self, inputs: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
-        logger.info(f"{self.name} forward pass - Input shape: {inputs.shape}, Index shape: {index.shape}")
+        # logger.info(f"{self.name} forward pass - Input shape: {inputs.shape}, Index shape: {index.shape}")
 
         assert index.shape == (self.index_dim,)
 
         output = self.mlp(inputs)
-        logger.info(f"{self.name} MLP output shape: {output.shape}")
+        # logger.info(f"{self.name} MLP output shape: {output.shape}")
 
         reshaped_output = output.view(inputs.shape[0], self.final_out, self.index_dim)
-        logger.info(f"{self.name} reshaped output shape: {reshaped_output.shape}")
+        # logger.info(f"{self.name} reshaped output shape: {reshaped_output.shape}")
 
         final_output = torch.matmul(reshaped_output, index)
-        logger.info(f"{self.name} final output shape: {final_output.shape}")
+        # logger.info(f"{self.name} final output shape: {final_output.shape}")
 
         return final_output
 
@@ -132,7 +132,7 @@ class GaussianIndexer:
         self.index_dim = index_dim
 
     def __call__(self, key: Any) -> torch.Tensor:
-        logger.info(f"GaussianIndexer generating index with dimension {self.index_dim}")
+        # logger.info(f"GaussianIndexer generating index with dimension {self.index_dim}")
         return torch.randn(self.index_dim)
 
 # %% Main Epinet architecture
@@ -176,11 +176,9 @@ class MLPEpinet(nn.Module):
         self.stop_gradient = stop_gradient
 
     def forward(self, x: torch.Tensor, z: Index) -> OutputWithPrior:
-        logger.info(f"{self.name} forward pass - Input shape: {x.shape}, Index shape: {z.shape}")
-
         base_out = self.base_mlp(x)
         features = base_out.extra['exposed_features']
-        logger.info(f"{self.name} base network features shape: {features.shape}")
+        # logger.info(f"{self.name} base network features shape: {features.shape}")
 
         if self.stop_gradient:
             epi_inputs = features.detach()
@@ -190,7 +188,7 @@ class MLPEpinet(nn.Module):
         epi_train = self.train_epinet(epi_inputs, z)
         epi_prior = self.prior_epinet(epi_inputs, z)
 
-        logger.info(f"{self.name} final output shapes - Train: {epi_train.shape}, Prior: {epi_prior.shape}")
+        # logger.info(f"{self.name} final output shapes - Train: {epi_train.shape}, Prior: {epi_prior.shape}")
 
         return OutputWithPrior(
             train=base_out.train + epi_train,
@@ -207,7 +205,7 @@ def make_mlp_epinet(
     name: Optional[str] = None,
 ) -> Tuple[nn.Module, Any]:
     """Factory function to create a standard MLP epinet."""
-    logger.info(f"Creating MLPEpinet with output sizes: {output_sizes}, epinet hiddens: {epinet_hiddens}, index dim: {index_dim}")
+    # logger.info(f"Creating MLPEpinet with output sizes: {output_sizes}, epinet hiddens: {epinet_hiddens}, index dim: {index_dim}")
 
     model = MLPEpinet(
         output_sizes=output_sizes,
@@ -227,7 +225,7 @@ def make_mlp_epinet(
 # %% Usage example
 def run_epinet_example():
     """Example usage of MLP epinet."""
-    logger.info("Running epinet example")
+    # logger.info("Running epinet example")
 
     # Create model
     input_dim = 10
