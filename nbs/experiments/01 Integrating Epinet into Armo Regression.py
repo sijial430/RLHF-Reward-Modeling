@@ -446,9 +446,15 @@ samples[0,0,:]
 # %%
 samples.std(dim=2)
 
+# %% [markdown]
+# This is the 'uncertainty' per dimension, averaged across all samples:
+
 # %%
 mean_std_per_dimension = (samples.std(dim=2)).mean(dim=0)  # Average across samples
 mean_std_per_dimension
+
+# %% [markdown]
+# The variance of uncertainty per dimension, across all samples:
 
 # %%
 std_of_std_per_dimension = (samples.std(dim=2)).std(dim=0)  # Average across samples
@@ -459,6 +465,180 @@ std_of_std_per_dimension
 # 1. different reward dimensions have different 'uncertainties'.
 # 2. The uncertainty per reward dimension changes across samples on a magnitude equal to the original std.
 # 3. The last six dimensions are, weirdly, far more uncertain than the first 13. 
+
+# %%
+mean_std_per_dimension = mean_std_per_dimension.detach().cpu().numpy()
+std_of_std_per_dimension = std_of_std_per_dimension.detach().cpu().numpy()
+
+# %% [markdown]
+# ## Most uncertain dimensions?
+
+# %%
+# Define attributes (reward objectives)
+dimensional_attributes = [
+    "helpsteer-helpfulness",
+    "helpsteer-correctness",
+    "helpsteer-coherence",
+    "helpsteer-complexity",
+    "helpsteer-verbosity",
+    "ultrafeedback-overall_score",
+    "ultrafeedback-instruction_following",
+    "ultrafeedback-truthfulness",
+    "ultrafeedback-honesty",
+    "ultrafeedback-helpfulness",
+    "beavertails-is_safe",
+    "prometheus-score",
+    "argilla-overall_quality",
+    "argilla-judge_lm",
+    "code-complexity",
+    "code-style",
+    "code-explanation",
+    "code-instruction-following",
+    "code-readability",
+]
+
+# %%
+plt.barh(dimensional_attributes,
+        mean_std_per_dimension)
+plt.title("Reward variance per dimension, averaged across dataset")
+
+# %%
+plt.barh(dimensional_attributes,
+        std_of_std_per_dimension)
+plt.title("Std. of reward variance per dimension, across dataset")
+
+# %% [markdown]
+# The clearest trends of the above:
+#
+# The five code-related dimensions have the most variance across epistemic indices. This indicates that, for the average prompt, the code rewards have high uncertainty -- our epistemic nn has chosen to direct more randomness towards this dimension than the others. 
+#
+# It's tempting to interpret this as the model's recognition that the coding dimensions should be uncertain on non coding questions. Perhaps this is the case. But recall - the model was never trained to take the coding rewards of anything outside of the coding dataset, so this would be a surprisingly advanced extrapolation for the model.
+#
+# More likely the coding dimensions have high uncertainty even on coding prompts.
+
+# %%
+mean_reward_values = samples.mean(dim = 2).mean(dim = 0).detach().cpu().numpy()
+plt.barh(dimensional_attributes, mean_reward_values, xerr = mean_std_per_dimension, color='orange')
+plt.title("Mean reward value per dimension, with error indicating uncertainty")
+
+# %% [markdown]
+# But, in context, we can see that none of the uncertainty variances are very high compared to the actual values assumed by most dimensions, even thought the variance of those values across samples is considerable (below).
+#
+# This suggests that the epistemic part of our reward model may have learned mainly to minimize itself -- or at least that examples on which there are really high epistemic variances are sufficiently out of distribution and sparse not to affect the std.
+
+# %%
+std_reward_values = samples.mean(dim = 2).std(dim = 0).detach().cpu().numpy()
+plt.barh(dimensional_attributes, mean_reward_values, xerr = std_reward_values, color = 'orange')
+plt.title("Mean reward value per dimension, with error indicating variance across samples")
+
+# %% [markdown]
+# ### Histograms over uncertainty show no outliers
+
+# %% [markdown]
+# We'll start by examining one dimension: code-style. This seems like it should have examples that are ambiguous (is it style, or stupidity?)
+
+# %%
+samples = samples.detach().cpu()
+
+# %%
+dim = 'code-style'
+dist_uncertainties_code_style = samples.std(dim = 2)[:,dimensional_attributes.index(dim)]
+
+plt.figure()
+plt.hist(dist_uncertainties_code_style, bins = 100, range=[0,0.1])
+plt.yscale('log')
+plt.ylabel("Frequency")
+plt.xlabel("Variance across epistemic samplings")
+plt.title(f"Histogram of {dim} uncertainties across samples")
+plt.show()
+
+# %%
+dim = 'beavertails-is_safe'
+dist_uncertainties_code_style = samples.std(dim = 2)[:,dimensional_attributes.index(dim)]
+
+plt.figure()
+plt.hist(dist_uncertainties_code_style, bins = 100, range=[0,0.1])
+plt.yscale('log')
+plt.ylabel("Frequency")
+plt.xlabel("Variance across epistemic samplings")
+plt.title(f"Histogram of {dim} uncertainties across samples")
+plt.show()
+
+# %%
+dim = 'ultrafeedback-overall_score'
+dist_uncertainties_code_style = samples.std(dim = 2)[:,dimensional_attributes.index(dim)]
+
+plt.figure()
+plt.hist(dist_uncertainties_code_style, bins = 100, range=[0,0.1])
+plt.yscale('log')
+plt.ylabel("Frequency")
+plt.xlabel("Variance across epistemic samplings")
+plt.title(f"Histogram of {dim} uncertainties across samples")
+plt.show()
+
+# %%
+import matplotlib.pyplot as plt
+import numpy as np
+
+def plot_dimension_histograms(matrix, dimension_names=None, title = "Uncertainty Histograms per Dimension", log_scale=False, **kwargs):
+    """
+    Given a matrix, produces a plot of histograms for each dimension on the same axis.
+    
+    Args:
+    - matrix (np.ndarray): The input matrix (2D array) where each column represents a dimension.
+    - dimension_names (list of str, optional): Names for each dimension to use in the legend.
+    - log_scale (bool, optional): If True, use log scale for the y-axis.
+    """
+    # Check if the input is 2D
+    if len(matrix.shape) != 2:
+        raise ValueError("Input matrix must be 2-dimensional")
+    
+    num_dims = matrix.shape[1]
+    
+    # Use provided dimension names, or default to numbered dimensions
+    if dimension_names is None:
+        dimension_names = [f'Dimension {i + 1}' for i in range(num_dims)]
+    elif len(dimension_names) != num_dims:
+        raise ValueError("Length of dimension_names must match the number of dimensions in the matrix.")
+    
+    # Plot histograms for each dimension on the same axis
+    plt.figure(figsize=(10, 6))
+    for dim in range(num_dims):
+        plt.hist(matrix[:, dim], bins=100, alpha=0.5, label=dimension_names[dim], **kwargs)
+    
+    plt.xlabel("Value")
+    plt.ylabel("Frequency")
+    plt.yscale('log' if log_scale else 'linear')
+    plt.title(title)
+    plt.legend()
+    plt.show()
+
+
+# %%
+uncertainty_dists = samples.std(dim = 2)
+plot_dimension_histograms(uncertainty_dists, dimension_names=dimensional_attributes, log_scale = True, range=[0,0.1])
+
+# %% [markdown]
+#
+
+# %% [markdown]
+# *I apprehend* from this that there are _no_ samples with uncertainty variances higher than 0.04, which is a tenth of the value obtained by most rewards. Likely the epistemic portion of the network has learned nothing besides how to minimize itself.
+#
+# Though it is curious that the uncertainty varies such across dimensions, and independently from the mean values of the dimensions. This suggests that it might be learning something...
+
+# %% [markdown]
+# ## Deeper Evaluations
+
+# %% [markdown]
+# What does this really mean? Has adding uncertainty helped or hurt our reward model? 
+#
+# We can only fully evaluate this once the second piece of the puzzle -- the gating network -- has been trained, which introduces another confounding set of design decisions. But perhaps some rougher comparisons can give us an initial sense of success:
+#
+# Here are some questions we can consider:
+#
+# 1. Does the epistemic reward model have a lower error predicting reward values, when uncertainty is factored in?
+# 2. In a comparative analysis across datasets, do we find that reward dimensions have higher uncertainty on a dataset of questions which should be unrelated to the reward?
+# 3. How much do the reward predictions of our epistemic RM differ from the regular RM? (To rigorously answer this, we should also train an linear regression layer with backprop instead of sklearn's ridge regression, to see if that accounts for the majority of the difference.)
 
 # %% [markdown]
 # # Conclusion
